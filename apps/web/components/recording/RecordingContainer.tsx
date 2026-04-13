@@ -50,7 +50,10 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
 
   // 录制模式
   const [recordingMode, setRecordingMode] = useState<RecordingMode>("manual");
-  const [previewScale, setPreviewScale] = useState(0.8);
+  const [previewScale, setPreviewScale] = useState(1); // 默认 100% 保证 1:1 对应
+  const [fps, setFps] = useState(60); // 提高默认帧率到 60
+  const [resolutionMode, setResolutionMode] = useState<"preview-sync" | "preset">("preview-sync");
+  const [resolutionPreset, setResolutionPreset] = useState<"1080x1920" | "1290x2796" | "1440x3120" | "2160x4680" | "custom">("1290x2796");
 
   // 自动播放配置
   const [autoPlayConfig, setAutoPlayConfig] = useState<AutoPlayConfig>({
@@ -131,13 +134,45 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
 
     try {
       setIsRecording(true);
+      
+      // 计算 outputScale：预览缩放就是导出缩放，保证 1:1 对应
+      // 如果使用预设分辨率，需要根据当前设备预览尺寸计算 scale
+      let outputScale = previewScale;
+      let videoBitrate = 5000000; // 基础码率 5Mbps
+      
+      if (resolutionMode === "preset" && previewCaptureRef.current) {
+        const rect = previewCaptureRef.current.getBoundingClientRect();
+        let presetW = 540, presetH = 960;
+        
+        if (resolutionPreset === "1080x1920") {
+          presetW = 540; presetH = 960;
+        } else if (resolutionPreset === "1290x2796") {
+          presetW = 645; presetH = 1398;
+        } else if (resolutionPreset === "1440x3120") {
+          presetW = 720; presetH = 1560;
+        } else if (resolutionPreset === "2160x4680") {
+          presetW = 1080; presetH = 2340;
+        }
+        
+        // 预设尺寸除以设备预览基础尺寸，得到对应 scale
+        outputScale = Math.max(0.5, presetW / (rect.width / previewScale));
+      }
+      
+      // 根据分辨率和帧率动态计算码率
+      // 计算像素数
+      const pixelCount = (previewCaptureRef.current?.getBoundingClientRect().width ?? 390) * 
+                         (previewCaptureRef.current?.getBoundingClientRect().height ?? 844) * 
+                         (outputScale * outputScale);
+      // 根据像素数、帧率计算合理的码率 (每像素每帧约 0.15 bits)
+      videoBitrate = Math.max(3000000, Math.round(pixelCount * fps * 0.15));
+
       recorderRef.current = new VideoRecorder({
         canvas: canvasRef.current ?? undefined,
         targetElement: previewCaptureRef.current,
         useDisplayMedia: true,
-        outputScale: 2,
-        fps: 30,
-        videoBitsPerSecond: 5000000,
+        outputScale,
+        fps,
+        videoBitsPerSecond: videoBitrate,
         onProgress: setRecordingProgress,
       });
 
@@ -444,9 +479,56 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
               max="1.35"
               step="0.05"
               value={previewScale}
-              onChange={(e) => setPreviewScale(parseFloat(e.target.value) || 0.8)}
+              onChange={(e) => setPreviewScale(parseFloat(e.target.value) || 1)}
             />
-            <div className="text-xs text-muted-foreground">{Math.round(previewScale * 100)}%</div>
+            <div className="text-xs text-muted-foreground">
+              {Math.round(previewScale * 100)}% (导出与预览 1:1 对应)
+            </div>
+          </div>
+
+          {/* 分辨率设置 */}
+          <div className="space-y-3">
+            <h3 className="font-medium text-sm">Resolution</h3>
+            <Select value={resolutionMode} onValueChange={(v) => setResolutionMode(v as "preview-sync" | "preset")}>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="preview-sync">Follow Preview Zoom</SelectItem>
+                <SelectItem value="preset">Use Preset</SelectItem>
+              </SelectContent>
+            </Select>
+            
+            {resolutionMode === "preset" && (
+              <Select value={resolutionPreset} onValueChange={(v) => setResolutionPreset(v as "1080x1920" | "1290x2796" | "1440x3120" | "2160x4680" | "custom")}>
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="1080x1920">1080 × 1920 (2×)</SelectItem>
+                  <SelectItem value="1290x2796">1290 × 2796 (3×)</SelectItem>
+                  <SelectItem value="1440x3120">1440 × 3120 (4×)</SelectItem>
+                  <SelectItem value="2160x4680">2160 × 4680 (6×)</SelectItem>
+                  <SelectItem value="custom">Custom</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+
+          {/* 帧率设置 */}
+          <div className="space-y-3">
+            <h3 className="font-medium text-sm">Frame Rate</h3>
+            <Select value={fps.toString()} onValueChange={(v) => setFps(parseInt(v))}>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="24">24 fps</SelectItem>
+                <SelectItem value="30">30 fps</SelectItem>
+                <SelectItem value="60">60 fps (推荐)</SelectItem>
+                <SelectItem value="120">120 fps (最流畅)</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           {/* 导出设置 */}
