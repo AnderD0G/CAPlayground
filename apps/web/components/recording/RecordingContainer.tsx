@@ -17,6 +17,9 @@ import { RecordingDevicePreview } from "./RecordingDevicePreview";
 import { VideoRecorder } from "@/lib/video-recorder";
 import { transcodeWebMToMp4 } from "@/lib/browser-transcoder";
 import { useToast } from "@/hooks/use-toast";
+import { useLocalStorage } from "@/hooks/use-local-storage";
+import { Switch } from "@/components/ui/switch";
+import { Sun, Moon } from "lucide-react";
 
 interface RecordingContainerProps {
   onBackClick: () => void;
@@ -58,7 +61,7 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
   const [useBrowserMp4Transcode, setUseBrowserMp4Transcode] = useState(true);
   const [isConvertingToMp4, setIsConvertingToMp4] = useState(false);
   const [resolutionMode, setResolutionMode] = useState<"preview-sync" | "preset">("preview-sync");
-  const [resolutionPreset, setResolutionPreset] = useState<"1080x1920" | "1290x2796" | "1440x3120" | "2160x4680" | "custom">("1290x2796");
+  const [resolutionPreset, setResolutionPreset] = useState<"1080x1920" | "1290x2796" | "1440x3120" | "2160x4680" | "4320x9360" | "custom">("1290x2796");
 
   // 自动播放配置
   const [autoPlayConfig, setAutoPlayConfig] = useState<AutoPlayConfig>({
@@ -77,12 +80,37 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
   const [exportFilename, setExportFilename] = useState(
     `recording-${new Date().getTime()}.mp4`
   );
+  const [clockDepthEffect, setClockDepthEffect] = useLocalStorage<boolean>("caplay_preview_clock_depth", false);
+  const [previewTheme, setPreviewTheme] = useLocalStorage<"Light" | "Dark">("caplay_preview_theme", "Light");
+  const [hasAppearanceSplit, setHasAppearanceSplit] = useState(false);
+  const [autoStopEnabled, setAutoStopEnabled] = useState(false);
+  const [autoStopSeconds, setAutoStopSeconds] = useState(10);
+  const [autoStopRemainingMs, setAutoStopRemainingMs] = useState<number | null>(null);
+  const [isStopping, setIsStopping] = useState(false);
+  const autoStopTimeoutRef = useRef<number | null>(null);
+  const autoStopIntervalRef = useRef<number | null>(null);
+  const autoStopDeadlineRef = useRef<number | null>(null);
+  const isRecordingRef = useRef(false);
+  const isStoppingRef = useRef(false);
 
   const clearAutoSequence = () => {
     for (const timeoutId of autoSequenceTimeoutsRef.current) {
       window.clearTimeout(timeoutId);
     }
     autoSequenceTimeoutsRef.current = [];
+  };
+
+  const clearAutoStop = () => {
+    if (autoStopTimeoutRef.current != null) {
+      window.clearTimeout(autoStopTimeoutRef.current);
+      autoStopTimeoutRef.current = null;
+    }
+    if (autoStopIntervalRef.current != null) {
+      window.clearInterval(autoStopIntervalRef.current);
+      autoStopIntervalRef.current = null;
+    }
+    autoStopDeadlineRef.current = null;
+    setAutoStopRemainingMs(null);
   };
 
   const emitAutoCommand = (type: AutoCommand["type"], durationMs?: number) => {
@@ -139,6 +167,9 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
 
     try {
       setIsRecording(true);
+      isRecordingRef.current = true;
+      isStoppingRef.current = false;
+      setIsStopping(false);
       
       // 计算 outputScale：预览缩放就是导出缩放，保证 1:1 对应
       // 如果使用预设分辨率，需要根据当前设备预览尺寸计算 scale
@@ -157,6 +188,8 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
           presetW = 720; presetH = 1560;
         } else if (resolutionPreset === "2160x4680") {
           presetW = 1080; presetH = 2340;
+        } else if (resolutionPreset === "4320x9360") {
+          presetW = 2160; presetH = 4680;
         }
         
         // 预设尺寸除以设备预览基础尺寸，得到对应 scale
@@ -172,7 +205,7 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
       const recorderPreferredFormat =
         useBrowserMp4Transcode && formatPreference === "mp4" ? "webm" : formatPreference;
 
-      const highLoadPreset = resolutionPreset === "2160x4680" || fps >= 120;
+      const highLoadPreset = resolutionPreset === "2160x4680" || resolutionPreset === "4320x9360" || fps >= 120;
       const baseBpp =
         recorderPreferredFormat === "webm"
           ? 0.07
@@ -183,7 +216,7 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
 
       // 限制码率上限，避免高分辨率+高帧率下编码器卡顿
       const rawBitrate = Math.round(pixelCount * fps * tunedBpp);
-      videoBitrate = Math.max(4_000_000, Math.min(28_000_000, rawBitrate));
+      videoBitrate = Math.max(4_000_000, Math.min(42_000_000, rawBitrate));
 
       recorderRef.current = new VideoRecorder({
         canvas: canvasRef.current ?? undefined,
@@ -197,6 +230,24 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
       });
 
       await recorderRef.current.start();
+
+      if (autoStopEnabled) {
+        clearAutoStop();
+        const durationMs = Math.max(1000, Math.round(autoStopSeconds * 1000));
+        autoStopDeadlineRef.current = Date.now() + durationMs;
+        setAutoStopRemainingMs(durationMs);
+
+        autoStopIntervalRef.current = window.setInterval(() => {
+          const deadline = autoStopDeadlineRef.current;
+          if (deadline == null) return;
+          const remaining = Math.max(0, deadline - Date.now());
+          setAutoStopRemainingMs(remaining);
+        }, 200);
+
+        autoStopTimeoutRef.current = window.setTimeout(() => {
+          void handleStopRecording("auto");
+        }, durationMs);
+      }
 
       // 如果是自动模式，自动播放动画
       if (recordingMode === "auto") {
@@ -213,6 +264,9 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
         variant: "destructive",
       });
       setIsRecording(false);
+      isRecordingRef.current = false;
+      clearAutoStop();
+      setIsStopping(false);
     }
   };
 
@@ -266,19 +320,32 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
   };
 
   // 停止录制
-  const handleStopRecording = async () => {
-    if (!recorderRef.current || !isRecording) return;
+  const handleStopRecording = async (source: "manual" | "auto" = "manual") => {
+    if (!recorderRef.current || !isRecordingRef.current || isStoppingRef.current) return;
+    isStoppingRef.current = true;
+    setIsStopping(true);
 
     try {
+      clearAutoStop();
       clearAutoSequence();
       setAutoCommand(undefined);
-      const blob = await recorderRef.current.stop();
+      if (source === "auto") {
+        toast({ title: "Auto stop", description: "Time is up. Stopping and exporting..." });
+      }
+      const stopTimeoutMs =
+        resolutionPreset === "4320x9360"
+          ? 120000
+          : resolutionPreset === "2160x4680"
+            ? 60000
+            : 30000;
+      const blob = await recorderRef.current.stop(stopTimeoutMs);
 
       if (blob.size === 0) {
         throw new Error("Empty video output (0 bytes)");
       }
 
       setIsRecording(false);
+      isRecordingRef.current = false;
 
       const recordedExt = recorderRef.current.getOutputExtension();
       const desiredExt = formatPreference === "auto" ? recordedExt : formatPreference;
@@ -330,18 +397,24 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
       });
     } catch (error) {
       console.error("Failed to stop recording:", error);
+      isRecordingRef.current = false;
+      setIsRecording(false);
       const message = error instanceof Error ? error.message : "Failed to export video";
       toast({
         title: "Error",
         description: message,
         variant: "destructive",
       });
+    } finally {
+      isStoppingRef.current = false;
+      setIsStopping(false);
     }
   };
 
   useEffect(() => {
     return () => {
       clearAutoSequence();
+      clearAutoStop();
     };
   }, []);
 
@@ -537,13 +610,43 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
             <Input
               type="range"
               min="0.5"
-              max="1.35"
+              max="2.5"
               step="0.05"
               value={previewScale}
               onChange={(e) => setPreviewScale(parseFloat(e.target.value) || 1)}
             />
             <div className="text-xs text-muted-foreground">
               {Math.round(previewScale * 100)}% (导出与预览 1:1 对应)
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <h3 className="font-medium text-sm">Preview Controls</h3>
+            <div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
+              <Label className="text-sm">Depth Effect</Label>
+              <Switch
+                checked={clockDepthEffect}
+                onCheckedChange={setClockDepthEffect}
+              />
+            </div>
+            <div className="space-y-2 rounded-md border px-3 py-2">
+              <div className="flex items-center justify-between gap-3">
+                <Label className="text-sm">Appearance</Label>
+                <div className="flex items-center gap-2">
+                  <Sun className="h-3 w-3" />
+                  <Switch
+                    checked={previewTheme === "Dark"}
+                    onCheckedChange={(checked) => setPreviewTheme(checked ? "Dark" : "Light")}
+                    disabled={!hasAppearanceSplit}
+                  />
+                  <Moon className="h-3 w-3" />
+                </div>
+              </div>
+              {!hasAppearanceSplit && (
+                <p className="text-xs text-muted-foreground">
+                  This project has no Light/Dark split states.
+                </p>
+              )}
             </div>
           </div>
 
@@ -561,7 +664,7 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
             </Select>
             
             {resolutionMode === "preset" && (
-              <Select value={resolutionPreset} onValueChange={(v) => setResolutionPreset(v as "1080x1920" | "1290x2796" | "1440x3120" | "2160x4680" | "custom")}>
+              <Select value={resolutionPreset} onValueChange={(v) => setResolutionPreset(v as "1080x1920" | "1290x2796" | "1440x3120" | "2160x4680" | "4320x9360" | "custom")}>
                 <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>
@@ -570,6 +673,7 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
                   <SelectItem value="1290x2796">1290 × 2796 (3×)</SelectItem>
                   <SelectItem value="1440x3120">1440 × 3120 (4×)</SelectItem>
                   <SelectItem value="2160x4680">2160 × 4680 (6×)</SelectItem>
+                  <SelectItem value="4320x9360">4320 × 9360 (8K)</SelectItem>
                   <SelectItem value="custom">Custom</SelectItem>
                 </SelectContent>
               </Select>
@@ -628,26 +732,56 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
                 className="mt-1 text-sm"
               />
             </div>
+            <div className="space-y-2 rounded-md border px-3 py-2">
+              <div className="flex items-center justify-between gap-3">
+                <Label className="text-sm">Auto Stop & Export</Label>
+                <Switch
+                  checked={autoStopEnabled}
+                  onCheckedChange={setAutoStopEnabled}
+                  disabled={isRecording || isStopping}
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={autoStopSeconds}
+                  onChange={(e) => setAutoStopSeconds(Math.max(1, parseInt(e.target.value) || 1))}
+                  disabled={!autoStopEnabled || isRecording || isStopping}
+                />
+                <span className="text-xs text-muted-foreground shrink-0">seconds</span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Automatically stops recording and starts export after the set duration.
+              </p>
+            </div>
           </div>
         </div>
 
         {/* 录制控制按钮 */}
         <div className="p-4 border-t space-y-2">
           {!isRecording ? (
-            <Button onClick={handleStartRecording} className="w-full" size="lg">
+            <Button onClick={handleStartRecording} className="w-full" size="lg" disabled={isStopping}>
               <Play className="h-4 w-4 mr-2" />
               Start Recording
             </Button>
           ) : (
             <Button
-              onClick={handleStopRecording}
+              onClick={() => void handleStopRecording("manual")}
               variant="destructive"
               className="w-full"
               size="lg"
+              disabled={isStopping}
             >
               <Square className="h-4 w-4 mr-2" />
-              Stop & Export
+              {isStopping ? "Stopping..." : "Stop & Export"}
             </Button>
+          )}
+          {isRecording && autoStopEnabled && autoStopRemainingMs != null && (
+            <div className="text-xs text-muted-foreground text-center">
+              Auto stop in {Math.ceil(autoStopRemainingMs / 1000)}s
+            </div>
           )}
           {recordingProgress > 0 && (
             <div className="text-xs text-muted-foreground text-center">
@@ -682,6 +816,12 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
               scale={previewScale}
               autoCommand={recordingMode === "auto" ? autoCommand : undefined}
               disableInteractions={recordingMode === "auto"}
+              showTopControls={false}
+              clockDepthEffect={clockDepthEffect}
+              onClockDepthEffectChange={setClockDepthEffect}
+              theme={previewTheme}
+              onThemeChange={setPreviewTheme}
+              onAppearanceSplitChange={setHasAppearanceSplit}
             />
           </div>
         </div>

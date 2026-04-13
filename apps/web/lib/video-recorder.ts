@@ -39,6 +39,29 @@ export class VideoRecorder {
   private startTime = 0;
   private mimeTypeUsed: string | undefined;
 
+  private cleanupCaptureResources(): void {
+    if (this.captureIntervalId !== null) {
+      window.clearInterval(this.captureIntervalId);
+      this.captureIntervalId = null;
+    }
+    if (this.cropAnimationFrameId !== null) {
+      cancelAnimationFrame(this.cropAnimationFrameId);
+      this.cropAnimationFrameId = null;
+    }
+    if (this.displayStream) {
+      this.displayStream.getTracks().forEach((track) => track.stop());
+      this.displayStream = null;
+    }
+    if (this.displayVideo) {
+      this.displayVideo.srcObject = null;
+      this.displayVideo = null;
+    }
+    if (this.stream) {
+      this.stream.getTracks().forEach((track) => track.stop());
+      this.stream = null;
+    }
+  }
+
   constructor(options: RecorderOptions) {
     this.canvas = options.canvas;
     this.targetElement = options.targetElement;
@@ -269,12 +292,36 @@ export class VideoRecorder {
     }
   }
 
-  stop(): Promise<Blob> {
+  stop(timeoutMs = 20000): Promise<Blob> {
     return new Promise((resolve, reject) => {
       if (!this.mediaRecorder || !this.isRecording) {
         reject(new Error('Recording not in progress'));
         return;
       }
+
+      let settled = false;
+      const finish = (err?: Error, blob?: Blob) => {
+        if (settled) return;
+        settled = true;
+        if (err) {
+          reject(err);
+          return;
+        }
+        resolve(blob as Blob);
+      };
+
+      const timeoutId = window.setTimeout(() => {
+        try {
+          if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+            this.mediaRecorder.stop();
+          }
+        } catch {
+        }
+
+        this.isRecording = false;
+        this.cleanupCaptureResources();
+        finish(new Error('Stop recording timed out while finalizing the video stream. Please try a lower resolution or FPS and record again.'));
+      }, Math.max(1000, timeoutMs));
 
       try {
         this.mediaRecorder.requestData();
@@ -282,51 +329,39 @@ export class VideoRecorder {
       }
 
       this.mediaRecorder.onstop = () => {
+        window.clearTimeout(timeoutId);
         const blob = new Blob(this.recordedChunks, { type: this.mimeTypeUsed || 'video/webm' });
         this.recordedChunks = [];
         this.isRecording = false;
-
-        if (this.captureIntervalId !== null) {
-          window.clearInterval(this.captureIntervalId);
-          this.captureIntervalId = null;
-        }
-        if (this.cropAnimationFrameId !== null) {
-          cancelAnimationFrame(this.cropAnimationFrameId);
-          this.cropAnimationFrameId = null;
-        }
-        if (this.displayStream) {
-          this.displayStream.getTracks().forEach((track) => track.stop());
-          this.displayStream = null;
-        }
-        if (this.displayVideo) {
-          this.displayVideo.srcObject = null;
-          this.displayVideo = null;
-        }
-
-        // 停止流
-        if (this.stream) {
-          this.stream.getTracks().forEach((track) => track.stop());
-          this.stream = null;
-        }
+        this.cleanupCaptureResources();
 
         if (blob.size === 0) {
-          reject(new Error('Recorded video is empty (0 bytes). Recorder produced no chunks, likely due to browser codec support or DOM capture failure (e.g. unsupported CSS in frame capture).'));
+          finish(new Error('Recorded video is empty (0 bytes). Recorder produced no chunks, likely due to browser codec support or DOM capture failure (e.g. unsupported CSS in frame capture).'));
           return;
         }
 
-        resolve(blob);
+        finish(undefined, blob);
       };
 
       this.mediaRecorder.onerror = (error) => {
+        window.clearTimeout(timeoutId);
         this.isRecording = false;
-        reject(error);
+        this.cleanupCaptureResources();
+        finish(error instanceof Error ? error : new Error('MediaRecorder error while stopping recording'));
       };
 
       // Ensure we have enough recorded timeline before stopping.
       const elapsed = performance.now() - this.startTime;
       const stopDelay = elapsed < 500 ? Math.ceil(500 - elapsed) : 120;
       window.setTimeout(() => {
-        this.mediaRecorder?.stop();
+        try {
+          this.mediaRecorder?.stop();
+        } catch {
+          window.clearTimeout(timeoutId);
+          this.isRecording = false;
+          this.cleanupCaptureResources();
+          finish(new Error('Failed to stop MediaRecorder'));
+        }
       }, stopDelay);
     });
   }

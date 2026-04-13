@@ -24,6 +24,12 @@ type Props = {
   stageStyle?: React.CSSProperties;
   autoCommand?: { id: number; type: "sleep" | "wake" | "swipe_unlock"; durationMs?: number };
   disableInteractions?: boolean;
+  showTopControls?: boolean;
+  clockDepthEffect?: boolean;
+  onClockDepthEffectChange?: (value: boolean) => void;
+  theme?: "Light" | "Dark";
+  onThemeChange?: (value: "Light" | "Dark") => void;
+  onAppearanceSplitChange?: (value: boolean) => void;
 }
 
 export default function DevicePreview({
@@ -34,6 +40,12 @@ export default function DevicePreview({
   stageStyle,
   autoCommand,
   disableInteractions = false,
+  showTopControls = true,
+  clockDepthEffect,
+  onClockDepthEffectChange,
+  theme,
+  onThemeChange,
+  onAppearanceSplitChange,
 }: Props) {
   const { doc } = useEditor();
   const { play, pause } = useTimeline()
@@ -47,9 +59,9 @@ export default function DevicePreview({
   const canvasWidth = doc?.meta.width ?? 390;
   const canvasHeight = doc?.meta.height ?? 844;
 
-  const [clockDepthEffect, setClockDepthEffect] = useLocalStorage<boolean>("caplay_preview_clock_depth", false);
+  const [storedClockDepthEffect, setStoredClockDepthEffect] = useLocalStorage<boolean>("caplay_preview_clock_depth", false);
   const [phoneState, setPhoneState] = useState(PHONE_STATES.LOCKED);
-  const [theme, setTheme] = useState<'Light' | 'Dark'>('Light');
+  const [storedTheme, setStoredTheme] = useLocalStorage<"Light" | "Dark">("caplay_preview_theme", "Light");
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState(0);
   const [isAnimatingToSleep, setIsAnimatingToSleep] = useState(false);
@@ -72,11 +84,33 @@ export default function DevicePreview({
   const scriptedWakeDurationRef = useRef<number | null>(null);
 
   const hasAppearanceSplit = Boolean(main?.appearanceSplit || background?.appearanceSplit);
+  const effectiveClockDepthEffect = clockDepthEffect ?? storedClockDepthEffect;
+  const effectiveTheme = theme ?? storedTheme;
+
+  const setClockDepthEffect = (value: boolean) => {
+    if (onClockDepthEffectChange) {
+      onClockDepthEffectChange(value);
+      return;
+    }
+    setStoredClockDepthEffect(value);
+  };
+
+  const setTheme = (value: "Light" | "Dark") => {
+    if (onThemeChange) {
+      onThemeChange(value);
+      return;
+    }
+    setStoredTheme(value);
+  };
   
   const stateForOverrides = (baseState: string) => {
     if (!hasAppearanceSplit) return baseState;
-    return `${baseState} ${theme}`;
+    return `${baseState} ${effectiveTheme}`;
   };
+
+  useEffect(() => {
+    onAppearanceSplitChange?.(hasAppearanceSplit);
+  }, [hasAppearanceSplit, onAppearanceSplitChange]);
 
   const getAppliedLayers = (state: string) => {
     const floatingLayers = main?.layers || [];
@@ -123,10 +157,10 @@ export default function DevicePreview({
     }
   }, [showPreview]);
 
-  const prevThemeRef = useRef(theme);
+  const prevThemeRef = useRef(effectiveTheme);
   useEffect(() => {
-    if (prevThemeRef.current === theme) return;
-    prevThemeRef.current = theme;
+    if (prevThemeRef.current === effectiveTheme) return;
+    prevThemeRef.current = effectiveTheme;
     
     if (!showPreview) return;
     if (!hasAppearanceSplit) return;
@@ -139,7 +173,7 @@ export default function DevicePreview({
       ...currentLayers.background,
       ...currentLayers.floating,
     ]);
-  }, [theme]);
+  }, [effectiveTheme]);
 
   useEffect(() => {
     if (phoneState === PHONE_STATES.SLEEP && !isAnimatingToSleep && !wasSleepingRef.current) {
@@ -572,29 +606,31 @@ export default function DevicePreview({
           onClick={handleSideButtonClick}
           disabled={disableInteractions || isAnimatingDragCancel || isAnimatingDragComplete || isAnimatingToSleep || isAnimatingFromSleep}
         />
-        <div className="absolute w-max bottom-[101%] left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 text-xs">
-          <div className="flex shrink-0 items-center gap-2 rounded-md bg-white/80 dark:bg-gray-900/70 border border-gray-200 dark:border-gray-700 px-2 py-1">
-            <Label>Depth Effect</Label>
-            <Switch
-              checked={clockDepthEffect}
-              onCheckedChange={setClockDepthEffect}
-              disabled={disableInteractions || isAnimatingDragCancel || isAnimatingDragComplete || isAnimatingToSleep || isAnimatingFromSleep}
-            />
-          </div>
-          {hasAppearanceSplit && (
-            <div className="flex items-center gap-2 rounded-md bg-white/80 dark:bg-gray-900/70 border border-gray-200 dark:border-gray-700 px-2 py-1">
-              <Label>Light</Label>
-              <Sun className="h-3 w-3" />
+        {showTopControls && (
+          <div className="absolute w-max bottom-[101%] left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 text-xs">
+            <div className="flex shrink-0 items-center gap-2 rounded-md bg-white/80 dark:bg-gray-900/70 border border-gray-200 dark:border-gray-700 px-2 py-1">
+              <Label>Depth Effect</Label>
               <Switch
-                checked={theme === 'Dark'}
-                onCheckedChange={(checked) => setTheme(checked ? 'Dark' : 'Light')}
+                checked={effectiveClockDepthEffect}
+                onCheckedChange={setClockDepthEffect}
                 disabled={disableInteractions || isAnimatingDragCancel || isAnimatingDragComplete || isAnimatingToSleep || isAnimatingFromSleep}
               />
-              <Moon className="h-3 w-3" />
-              <Label>Dark</Label>
             </div>
-          )}
-        </div>
+            {hasAppearanceSplit && (
+              <div className="flex items-center gap-2 rounded-md bg-white/80 dark:bg-gray-900/70 border border-gray-200 dark:border-gray-700 px-2 py-1">
+                <Label>Light</Label>
+                <Sun className="h-3 w-3" />
+                <Switch
+                  checked={effectiveTheme === 'Dark'}
+                  onCheckedChange={(checked) => setTheme(checked ? 'Dark' : 'Light')}
+                  disabled={disableInteractions || isAnimatingDragCancel || isAnimatingDragComplete || isAnimatingToSleep || isAnimatingFromSleep}
+                />
+                <Moon className="h-3 w-3" />
+                <Label>Dark</Label>
+              </div>
+            )}
+          </div>
+        )}
 
         <div
           ref={phoneScreenRef}

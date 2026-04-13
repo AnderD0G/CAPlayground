@@ -15,12 +15,24 @@ interface RecordingDevicePreviewProps {
   scale: number;
   autoCommand?: { id: number; type: "sleep" | "wake" | "swipe_unlock"; durationMs?: number };
   disableInteractions?: boolean;
+  showTopControls?: boolean;
+  clockDepthEffect?: boolean;
+  onClockDepthEffectChange?: (value: boolean) => void;
+  theme?: "Light" | "Dark";
+  onThemeChange?: (value: "Light" | "Dark") => void;
+  onAppearanceSplitChange?: (value: boolean) => void;
 }
 
 export function RecordingDevicePreview({
   scale,
   autoCommand,
   disableInteractions = false,
+  showTopControls = false,
+  clockDepthEffect,
+  onClockDepthEffectChange,
+  theme,
+  onThemeChange,
+  onAppearanceSplitChange,
 }: RecordingDevicePreviewProps) {
   const stageRef = useRef<HTMLDivElement | null>(null);
   const moveableRef = useRef<Moveable | null>(null);
@@ -101,6 +113,12 @@ export function RecordingDevicePreview({
         stageStyle={{ background: "transparent" }}
         autoCommand={autoCommand}
         disableInteractions={disableInteractions}
+        showTopControls={showTopControls}
+        clockDepthEffect={clockDepthEffect}
+        onClockDepthEffectChange={onClockDepthEffectChange}
+        theme={theme}
+        onThemeChange={onThemeChange}
+        onAppearanceSplitChange={onAppearanceSplitChange}
       >
         <div
           id="root-canvas"
