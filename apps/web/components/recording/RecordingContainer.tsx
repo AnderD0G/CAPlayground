@@ -93,6 +93,17 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
   const isRecordingRef = useRef(false);
   const isStoppingRef = useRef(false);
 
+  // 签名配置
+  const [showSignature, setShowSignature] = useState(false);
+  const [signatureText, setSignatureText] = useState("Signature");
+  const [signaturePlacement, setSignaturePlacement] = useState<"top" | "bottom">("bottom");
+  const [signatureVertical, setSignatureVertical] = useState(50); // 0-100，距离安全区顶部的百分比
+  const [signatureHorizontal, setSignatureHorizontal] = useState(50); // 0-100，左右位置百分比
+  const [signatureFontSize, setSignatureFontSize] = useState(14);
+  const [signatureFont, setSignatureFont] = useState("Arial");
+  const [signatureColor, setSignatureColor] = useState("#000000");
+  const [signatureOpacity, setSignatureOpacity] = useState(0.85);
+
   const clearAutoSequence = () => {
     for (const timeoutId of autoSequenceTimeoutsRef.current) {
       window.clearTimeout(timeoutId);
@@ -148,7 +159,38 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
     }
     return {};
   };
-
+  // 获取签名样式
+  const getSignatureStyle = (): React.CSSProperties => {
+    const safeAreaPercent = 4; // 4% 安全区距离
+    const safeAreaPx = 16; // 约 4% of 390/2
+    const availableHeight = 100 - safeAreaPercent * 2; // 92%
+    const availableWidth = 100 - safeAreaPercent * 2; // 92%
+    
+    // 垂直位置：根据 signatureVertical (0-100) 和 signaturePlacement
+    let topPercent: number;
+    if (signaturePlacement === "top") {
+      topPercent = safeAreaPercent + (signatureVertical / 100) * availableHeight;
+    } else {
+      topPercent = 100 - safeAreaPercent - ((100 - signatureVertical) / 100) * availableHeight;
+    }
+    
+    // 水平位置：根据 signatureHorizontal (0-100)
+    const leftPercent = safeAreaPercent + (signatureHorizontal / 100) * availableWidth;
+    
+    return {
+      position: "absolute",
+      left: `${leftPercent}%`,
+      top: `${topPercent}%`,
+      transform: "translate(-50%, -50%)",
+      fontSize: `${signatureFontSize}px`,
+      fontFamily: signatureFont,
+      color: signatureColor,
+      opacity: signatureOpacity,
+      textShadow: "0 1px 8px rgba(0,0,0,0.3)",
+      pointerEvents: "none",
+      whiteSpace: "nowrap",
+    };
+  };
   // 开始录制
   const handleStartRecording = async () => {
     if (!previewCaptureRef.current) {
@@ -488,6 +530,128 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
             )}
           </div>
 
+          {/* 签名配置 */}
+          <div className="space-y-3 rounded-md border px-3 py-2">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="font-medium text-sm">Signature</h3>
+              <Switch
+                checked={showSignature}
+                onCheckedChange={setShowSignature}
+              />
+            </div>
+            
+            {showSignature && (
+              <div className="space-y-3">
+                <div>
+                  <Label className="text-xs">Text</Label>
+                  <Input
+                    value={signatureText}
+                    onChange={(e) => setSignatureText(e.target.value)}
+                    placeholder="Enter signature"
+                    className="mt-1 text-sm h-8"
+                  />
+                </div>
+
+                <div>
+                  <Label className="text-xs">Position</Label>
+                  <Select value={signaturePlacement} onValueChange={(v: any) => setSignaturePlacement(v)}>
+                    <SelectTrigger className="h-8 text-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="top">Top</SelectItem>
+                      <SelectItem value="bottom">Bottom</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <Label className="text-xs">Vertical Distance ({signatureVertical}%)</Label>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={signatureVertical}
+                    onChange={(e) => setSignatureVertical(parseInt(e.target.value))}
+                    className="w-full mt-1 h-2"
+                  />
+                </div>
+
+                <div>
+                  <Label className="text-xs">Horizontal Position ({signatureHorizontal}%)</Label>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={signatureHorizontal}
+                    onChange={(e) => setSignatureHorizontal(parseInt(e.target.value))}
+                    className="w-full mt-1 h-2"
+                  />
+                </div>
+
+                <div>
+                  <Label className="text-xs">Font Size ({signatureFontSize}px)</Label>
+                  <input
+                    type="range"
+                    min="8"
+                    max="36"
+                    step="1"
+                    value={signatureFontSize}
+                    onChange={(e) => setSignatureFontSize(parseInt(e.target.value))}
+                    className="w-full mt-1 h-2"
+                  />
+                </div>
+
+                <div>
+                  <Label className="text-xs">Font</Label>
+                  <Select value={signatureFont} onValueChange={setSignatureFont}>
+                    <SelectTrigger className="h-8 text-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Arial">Arial</SelectItem>
+                      <SelectItem value="Georgia">Georgia</SelectItem>
+                      <SelectItem value="Times New Roman">Times New Roman</SelectItem>
+                      <SelectItem value="Courier New">Courier New</SelectItem>
+                      <SelectItem value="Verdana">Verdana</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <Label className="text-xs">Color</Label>
+                  <div className="flex gap-2 mt-1">
+                    <Input
+                      type="color"
+                      value={signatureColor}
+                      onChange={(e) => setSignatureColor(e.target.value)}
+                      className="h-8 w-16"
+                    />
+                    <Input
+                      type="text"
+                      value={signatureColor}
+                      onChange={(e) => setSignatureColor(e.target.value)}
+                      className="flex-1 text-xs h-8"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <Label className="text-xs">Opacity ({Math.round(signatureOpacity * 100)}%)</Label>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value={signatureOpacity}
+                    onChange={(e) => setSignatureOpacity(parseFloat(e.target.value))}
+                    className="w-full mt-1 h-2"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* 录制模式 */}
           <div className="space-y-3">
             <h3 className="font-medium text-sm">Recording Mode</h3>
@@ -812,6 +976,20 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
 
           {/* 设备预览 */}
           <div className="relative" ref={previewCaptureRef}>
+            {/* 录制前显示捕捉区域框 */}
+            {!isRecording && (
+              <div 
+                className="absolute inset-0 rounded-2xl border-2 border-dashed border-primary/50 pointer-events-none z-40"
+                style={{
+                  boxShadow: "inset 0 0 0 1px rgba(59, 130, 246, 0.2)"
+                }}
+              >
+                <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-xs font-medium text-primary/70">
+                  Capture Area
+                </div>
+              </div>
+            )}
+
             <RecordingDevicePreview
               scale={previewScale}
               autoCommand={recordingMode === "auto" ? autoCommand : undefined}
@@ -823,6 +1001,20 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
               onThemeChange={setPreviewTheme}
               onAppearanceSplitChange={setHasAppearanceSplit}
             />
+
+            {/* 签名层 */}
+            {showSignature && signatureText.trim() && (
+              <div 
+                className="absolute inset-0 pointer-events-none z-20 rounded-2xl overflow-hidden"
+                style={{
+                  padding: "4%"
+                }}
+              >
+                <div style={getSignatureStyle()}>
+                  {signatureText}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
