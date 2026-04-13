@@ -8,6 +8,7 @@ export interface RecorderOptions {
   canvas?: HTMLCanvasElement;
   targetElement?: HTMLElement;
   useDisplayMedia?: boolean;
+  outputScale?: number;
   fps?: number;
   videoBitsPerSecond?: number;
   onProgress?: (progress: number) => void;
@@ -21,8 +22,12 @@ export class VideoRecorder {
   private canvas?: HTMLCanvasElement;
   private targetElement?: HTMLElement;
   private useDisplayMedia: boolean;
+  private outputScale: number;
   private captureCanvas: HTMLCanvasElement | null = null;
   private captureIntervalId: number | null = null;
+  private cropAnimationFrameId: number | null = null;
+  private displayStream: MediaStream | null = null;
+  private displayVideo: HTMLVideoElement | null = null;
   private captureBusy = false;
   private captureErrorCount = 0;
   private fps: number;
@@ -36,6 +41,7 @@ export class VideoRecorder {
     this.canvas = options.canvas;
     this.targetElement = options.targetElement;
     this.useDisplayMedia = options.useDisplayMedia ?? false;
+    this.outputScale = options.outputScale ?? 1;
     this.fps = options.fps || 30;
     this.videoBitsPerSecond = options.videoBitsPerSecond || 5000000; // 5Mbps
     this.onProgress = options.onProgress;
@@ -54,12 +60,25 @@ export class VideoRecorder {
     try {
       let stream: MediaStream;
       if (this.useDisplayMedia && navigator.mediaDevices?.getDisplayMedia) {
-        stream = await navigator.mediaDevices.getDisplayMedia({
-          video: {
-            frameRate: this.fps,
-          },
-          audio: false,
-        });
+        try {
+          const displayStream = await navigator.mediaDevices.getDisplayMedia({
+            video: {
+              frameRate: this.fps,
+            },
+            audio: false,
+          });
+          this.displayStream = displayStream;
+
+          if (this.targetElement) {
+            stream = await this.createCroppedStreamFromDisplay(displayStream);
+          } else {
+            stream = displayStream;
+          }
+        } catch (error) {
+          console.warn('Display media capture failed, falling back to DOM capture', error);
+          const sourceCanvas = await this.prepareCaptureSource();
+          stream = sourceCanvas.captureStream(this.fps);
+        }
       } else {
         const sourceCanvas = await this.prepareCaptureSource();
         stream = sourceCanvas.captureStream(this.fps);
@@ -92,9 +111,67 @@ export class VideoRecorder {
         this.startDomCaptureLoop();
       }
     } catch (error) {
+      this.isRecording = false;
       console.error('Failed to start recording:', error);
       throw error;
     }
+  }
+
+  private async createCroppedStreamFromDisplay(displayStream: MediaStream): Promise<MediaStream> {
+    const video = document.createElement('video');
+    video.srcObject = displayStream;
+    video.muted = true;
+    video.playsInline = true;
+    this.displayVideo = video;
+
+    await new Promise<void>((resolve, reject) => {
+      const onLoaded = () => resolve();
+      const onError = () => reject(new Error('Failed to initialize display capture video'));
+      video.addEventListener('loadedmetadata', onLoaded, { once: true });
+      video.addEventListener('error', onError, { once: true });
+      void video.play().catch(() => {
+        // Some browsers still provide frames even when autoplay play() rejects.
+      });
+    });
+
+    const rect = this.targetElement?.getBoundingClientRect();
+    if (!rect) {
+      throw new Error('Target element is not available for cropped recording');
+    }
+
+    const scale = Math.max(0.5, this.outputScale);
+    const outW = Math.max(2, Math.round(rect.width * scale));
+    const outH = Math.max(2, Math.round(rect.height * scale));
+    const canvas = this.canvas ?? document.createElement('canvas');
+    canvas.width = outW;
+    canvas.height = outH;
+    this.captureCanvas = canvas;
+
+    const render = () => {
+      if (!this.isRecording || !this.captureCanvas || !this.displayVideo || !this.targetElement) return;
+      const ctx = this.captureCanvas.getContext('2d');
+      if (!ctx) return;
+
+      const r = this.targetElement.getBoundingClientRect();
+      const vw = this.displayVideo.videoWidth || window.innerWidth;
+      const vh = this.displayVideo.videoHeight || window.innerHeight;
+      const sxScale = vw / Math.max(window.innerWidth, 1);
+      const syScale = vh / Math.max(window.innerHeight, 1);
+
+      const sx = Math.max(0, Math.round(r.left * sxScale));
+      const sy = Math.max(0, Math.round(r.top * syScale));
+      const sw = Math.max(1, Math.round(r.width * sxScale));
+      const sh = Math.max(1, Math.round(r.height * syScale));
+
+      ctx.clearRect(0, 0, this.captureCanvas.width, this.captureCanvas.height);
+      ctx.drawImage(this.displayVideo, sx, sy, sw, sh, 0, 0, this.captureCanvas.width, this.captureCanvas.height);
+
+      this.cropAnimationFrameId = requestAnimationFrame(render);
+    };
+
+    this.isRecording = true;
+    render();
+    return canvas.captureStream(this.fps);
   }
 
   private async prepareCaptureSource(): Promise<HTMLCanvasElement> {
@@ -209,6 +286,18 @@ export class VideoRecorder {
         if (this.captureIntervalId !== null) {
           window.clearInterval(this.captureIntervalId);
           this.captureIntervalId = null;
+        }
+        if (this.cropAnimationFrameId !== null) {
+          cancelAnimationFrame(this.cropAnimationFrameId);
+          this.cropAnimationFrameId = null;
+        }
+        if (this.displayStream) {
+          this.displayStream.getTracks().forEach((track) => track.stop());
+          this.displayStream = null;
+        }
+        if (this.displayVideo) {
+          this.displayVideo.srcObject = null;
+          this.displayVideo = null;
         }
 
         // 停止流

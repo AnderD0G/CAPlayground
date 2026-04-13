@@ -50,6 +50,7 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
 
   // 录制模式
   const [recordingMode, setRecordingMode] = useState<RecordingMode>("manual");
+  const [previewScale, setPreviewScale] = useState(0.8);
 
   // 自动播放配置
   const [autoPlayConfig, setAutoPlayConfig] = useState<AutoPlayConfig>({
@@ -134,6 +135,7 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
         canvas: canvasRef.current ?? undefined,
         targetElement: previewCaptureRef.current,
         useDisplayMedia: true,
+        outputScale: 2,
         fps: 30,
         videoBitsPerSecond: 5000000,
         onProgress: setRecordingProgress,
@@ -149,9 +151,10 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
       toast({ title: "Recording started", description: "If prompted, choose this browser tab for best results" });
     } catch (error) {
       console.error("Failed to start recording:", error);
+      const message = error instanceof Error ? error.message : "Failed to start recording";
       toast({
         title: "Error",
-        description: "Failed to start recording",
+        description: message,
         variant: "destructive",
       });
       setIsRecording(false);
@@ -433,6 +436,19 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
             </Tabs>
           </div>
 
+          <div className="space-y-3">
+            <h3 className="font-medium text-sm">Preview Zoom</h3>
+            <Input
+              type="range"
+              min="0.5"
+              max="1.35"
+              step="0.05"
+              value={previewScale}
+              onChange={(e) => setPreviewScale(parseFloat(e.target.value) || 0.8)}
+            />
+            <div className="text-xs text-muted-foreground">{Math.round(previewScale * 100)}%</div>
+          </div>
+
           {/* 导出设置 */}
           <div className="space-y-3">
             <h3 className="font-medium text-sm">Export</h3>
@@ -491,7 +507,7 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
           {/* 设备预览 */}
           <div className="relative" ref={previewCaptureRef}>
             <RecordingDevicePreview
-              scale={0.5}
+              scale={previewScale}
               autoCommand={recordingMode === "auto" ? autoCommand : undefined}
               disableInteractions={recordingMode === "auto"}
             />
