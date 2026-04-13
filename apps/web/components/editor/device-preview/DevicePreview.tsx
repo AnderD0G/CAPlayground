@@ -22,7 +22,7 @@ type Props = {
   setPreviewLayers: (layers: AnyLayer[] | null) => void;
   scale: number;
   stageStyle?: React.CSSProperties;
-  controlledPhoneState?: "Locked" | "Unlock" | "Sleep";
+  autoCommand?: { id: number; type: "sleep" | "wake" | "swipe_unlock"; durationMs?: number };
   disableInteractions?: boolean;
 }
 
@@ -32,7 +32,7 @@ export default function DevicePreview({
   setPreviewLayers,
   scale,
   stageStyle,
-  controlledPhoneState,
+  autoCommand,
   disableInteractions = false,
 }: Props) {
   const { doc } = useEditor();
@@ -68,6 +68,8 @@ export default function DevicePreview({
   const dragCompleteStartRef = useRef<number | null>(null);
   const dragCompleteFromProgressRef = useRef<number>(0);
   const dragCompleteTargetStateRef = useRef<string>(PHONE_STATES.UNLOCK);
+  const scriptedSleepDurationRef = useRef<number | null>(null);
+  const scriptedWakeDurationRef = useRef<number | null>(null);
 
   const hasAppearanceSplit = Boolean(main?.appearanceSplit || background?.appearanceSplit);
   
@@ -121,12 +123,6 @@ export default function DevicePreview({
     }
   }, [showPreview]);
 
-  useEffect(() => {
-    if (!showPreview || !controlledPhoneState) return;
-    setDragOffset(0);
-    setPhoneState(controlledPhoneState);
-  }, [controlledPhoneState, showPreview]);
-
   const prevThemeRef = useRef(theme);
   useEffect(() => {
     if (prevThemeRef.current === theme) return;
@@ -162,7 +158,7 @@ export default function DevicePreview({
         if (!sleepAnimationStartRef.current) return;
 
         const elapsed = currentTime - sleepAnimationStartRef.current;
-        const duration = 500;
+        const duration = Math.max(100, scriptedSleepDurationRef.current ?? 500);
         const progress = Math.min(elapsed / duration, 1);
 
         const interpolatedFloating = interpolateLayers(fromLayers.floating, targetLayers.floating, progress);
@@ -178,6 +174,7 @@ export default function DevicePreview({
         } else {
           setIsAnimatingToSleep(false);
           sleepAnimationStartRef.current = null;
+          scriptedSleepDurationRef.current = null;
         }
       };
 
@@ -189,6 +186,7 @@ export default function DevicePreview({
         }
         setIsAnimatingToSleep(false);
         sleepAnimationStartRef.current = null;
+        scriptedSleepDurationRef.current = null;
       };
     }
 
@@ -213,7 +211,7 @@ export default function DevicePreview({
         if (!sleepAnimationStartRef.current) return;
 
         const elapsed = currentTime - sleepAnimationStartRef.current;
-        const duration = 500;
+        const duration = Math.max(100, scriptedWakeDurationRef.current ?? 500);
         const progress = Math.min(elapsed / duration, 1);
 
         const interpolatedFloating = interpolateLayers(fromLayers.floating, targetLayers.floating, progress);
@@ -230,6 +228,7 @@ export default function DevicePreview({
           setIsAnimatingFromSleep(false);
           sleepAnimationStartRef.current = null;
           wasSleepingRef.current = false;
+          scriptedWakeDurationRef.current = null;
         }
       };
 
@@ -242,6 +241,7 @@ export default function DevicePreview({
         setIsAnimatingFromSleep(false);
         sleepAnimationStartRef.current = null;
         wasSleepingRef.current = false;
+        scriptedWakeDurationRef.current = null;
       };
     }
   }, [phoneState]);
@@ -345,6 +345,53 @@ export default function DevicePreview({
   const dragDirectionRef = useRef<"up" | "down" | null>(null);
   const phoneScreenRef = useRef<HTMLDivElement | null>(null);
   const dragStartElementRef = useRef<"home-bar" | "status-bar" | null>(null);
+
+  useEffect(() => {
+    if (!showPreview || !autoCommand) return;
+
+    if (autoCommand.type === "sleep") {
+      setDragOffset(0);
+      scriptedSleepDurationRef.current = autoCommand.durationMs ?? null;
+      setPhoneState(PHONE_STATES.SLEEP);
+      return;
+    }
+
+    if (autoCommand.type === "wake") {
+      setDragOffset(0);
+      if (phoneState === PHONE_STATES.SLEEP) {
+        scriptedWakeDurationRef.current = autoCommand.durationMs ?? null;
+        setPhoneState(PHONE_STATES.LOCKED);
+      }
+      return;
+    }
+
+    if (autoCommand.type === "swipe_unlock") {
+      if (phoneState !== PHONE_STATES.LOCKED) return;
+      setIsDragging(true);
+
+      const start = performance.now();
+      const duration = Math.max(100, autoCommand.durationMs ?? 650);
+      const screenH = Math.max((phoneScreenRef.current?.clientHeight ?? canvasHeight) / Math.max(scale, 0.001), 1);
+
+      const animate = (t: number) => {
+        const p = Math.min((t - start) / duration, 1);
+        const offset = -screenH * p;
+        setDragOffset(offset);
+        updateLayersWithProgress(PHONE_STATES.UNLOCK, p);
+
+        if (p < 1) {
+          requestAnimationFrame(animate);
+          return;
+        }
+
+        setIsDragging(false);
+        setDragOffset(-screenH);
+        setPhoneState(PHONE_STATES.UNLOCK);
+      };
+
+      requestAnimationFrame(animate);
+    }
+  }, [autoCommand?.id, showPreview]);
 
   const handleSideButtonClick = () => {
     if (disableInteractions) return;

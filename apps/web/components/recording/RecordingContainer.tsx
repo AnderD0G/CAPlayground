@@ -28,13 +28,18 @@ interface AutoPlayConfig {
   sleepDuration: number; // 秒
   unlockDuration: number; // 秒
   lockDuration: number; // 秒
+  swipeDuration: number; // 秒
+  wakeDuration: number; // 秒
   loop: boolean;
 }
+
+type AutoCommand = { id: number; type: "sleep" | "wake" | "swipe_unlock"; durationMs?: number };
 
 export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
   const { toast } = useToast();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const previewCaptureRef = useRef<HTMLDivElement>(null);
   const recorderRef = useRef<VideoRecorder | null>(null);
   const autoSequenceTimeoutsRef = useRef<number[]>([]);
 
@@ -51,13 +56,15 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
     sleepDuration: 2,
     unlockDuration: 2,
     lockDuration: 2,
+    swipeDuration: 0.8,
+    wakeDuration: 0.6,
     loop: true,
   });
 
   // 录制状态
   const [isRecording, setIsRecording] = useState(false);
   const [recordingProgress, setRecordingProgress] = useState(0);
-  const [controlledPhoneState, setControlledPhoneState] = useState<"Locked" | "Unlock" | "Sleep" | undefined>(undefined);
+  const [autoCommand, setAutoCommand] = useState<AutoCommand | undefined>(undefined);
   const [exportFilename, setExportFilename] = useState(
     `recording-${new Date().getTime()}.webm`
   );
@@ -67,6 +74,10 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
       window.clearTimeout(timeoutId);
     }
     autoSequenceTimeoutsRef.current = [];
+  };
+
+  const emitAutoCommand = (type: AutoCommand["type"], durationMs?: number) => {
+    setAutoCommand({ id: Date.now() + Math.floor(Math.random() * 1000), type, durationMs });
   };
 
   // 处理背景上传
@@ -103,8 +114,8 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
 
   // 开始录制
   const handleStartRecording = async () => {
-    if (!canvasRef.current) {
-      toast({ title: "Error", description: "Canvas not found", variant: "destructive" });
+    if (!previewCaptureRef.current) {
+      toast({ title: "Error", description: "Preview area not found", variant: "destructive" });
       return;
     }
 
@@ -120,7 +131,9 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
     try {
       setIsRecording(true);
       recorderRef.current = new VideoRecorder({
-        canvas: canvasRef.current,
+        canvas: canvasRef.current ?? undefined,
+        targetElement: previewCaptureRef.current,
+        useDisplayMedia: true,
         fps: 30,
         videoBitsPerSecond: 5000000,
         onProgress: setRecordingProgress,
@@ -131,11 +144,9 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
       // 如果是自动模式，自动播放动画
       if (recordingMode === "auto") {
         runAutoPlaySequence();
-      } else {
-        setControlledPhoneState(undefined);
       }
 
-      toast({ title: "Recording started", description: "Started recording your presentation" });
+      toast({ title: "Recording started", description: "If prompted, choose this browser tab for best results" });
     } catch (error) {
       console.error("Failed to start recording:", error);
       toast({
@@ -152,23 +163,35 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
     clearAutoSequence();
 
     const sleepMs = autoPlayConfig.sleepDuration * 1000;
-    const unlockMs = autoPlayConfig.unlockDuration * 1000;
-    const lockMs = autoPlayConfig.lockDuration * 1000;
-    const cycleMs = sleepMs + unlockMs + lockMs;
+    const holdUnlockedMs = autoPlayConfig.unlockDuration * 1000;
+    const beforeSwipeMs = autoPlayConfig.lockDuration * 1000;
+    const wakeMs = Math.max(100, Math.round(autoPlayConfig.wakeDuration * 1000));
+    const swipeMs = Math.max(100, Math.round(autoPlayConfig.swipeDuration * 1000));
+    const cycleMs = sleepMs + wakeMs + beforeSwipeMs + swipeMs + holdUnlockedMs;
 
     const runCycle = () => {
-      setControlledPhoneState("Sleep");
+      // Step 1: start from sleep
+      emitAutoCommand("sleep");
 
       autoSequenceTimeoutsRef.current.push(
         window.setTimeout(() => {
-          setControlledPhoneState("Unlock");
+          // Step 2: click side button to wake to lock screen
+          emitAutoCommand("wake", wakeMs);
         }, sleepMs)
       );
 
       autoSequenceTimeoutsRef.current.push(
         window.setTimeout(() => {
-          setControlledPhoneState("Locked");
-        }, sleepMs + unlockMs)
+          // Step 3: swipe up to unlock
+          emitAutoCommand("swipe_unlock", swipeMs);
+        }, sleepMs + wakeMs + beforeSwipeMs)
+      );
+
+      // Step 4: after showing unlocked for a while, sleep again (next cycle starts from sleep)
+      autoSequenceTimeoutsRef.current.push(
+        window.setTimeout(() => {
+          emitAutoCommand("sleep");
+        }, sleepMs + wakeMs + beforeSwipeMs + swipeMs + holdUnlockedMs)
       );
 
       if (autoPlayConfig.loop) {
@@ -190,8 +213,13 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
 
     try {
       clearAutoSequence();
-      setControlledPhoneState(undefined);
+      setAutoCommand(undefined);
       const blob = await recorderRef.current.stop();
+
+      if (blob.size === 0) {
+        throw new Error("Empty video output (0 bytes)");
+      }
+
       setIsRecording(false);
 
       // 导出视频
@@ -199,13 +227,14 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
 
       toast({
         title: "Success",
-        description: `Video exported as ${exportFilename}`,
+        description: `Video exported (${Math.round(blob.size / 1024)} KB) as ${exportFilename}`,
       });
     } catch (error) {
       console.error("Failed to stop recording:", error);
+      const message = error instanceof Error ? error.message : "Failed to export video";
       toast({
         title: "Error",
-        description: "Failed to export video",
+        description: message,
         variant: "destructive",
       });
     }
@@ -322,7 +351,7 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
                   />
                 </div>
                 <div>
-                  <Label className="text-sm">Unlock Duration (s)</Label>
+                  <Label className="text-sm">Unlocked Hold (s)</Label>
                   <Input
                     type="number"
                     min="1"
@@ -338,7 +367,7 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
                   />
                 </div>
                 <div>
-                  <Label className="text-sm">Lock Duration (s)</Label>
+                  <Label className="text-sm">Before Swipe Delay (s)</Label>
                   <Input
                     type="number"
                     min="1"
@@ -348,6 +377,40 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
                       setAutoPlayConfig((prev) => ({
                         ...prev,
                         lockDuration: parseInt(e.target.value) || 1,
+                      }))
+                    }
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <Label className="text-sm">Wake Animation (s)</Label>
+                  <Input
+                    type="number"
+                    min="0.1"
+                    max="5"
+                    step="0.1"
+                    value={autoPlayConfig.wakeDuration}
+                    onChange={(e) =>
+                      setAutoPlayConfig((prev) => ({
+                        ...prev,
+                        wakeDuration: parseFloat(e.target.value) || 0.6,
+                      }))
+                    }
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <Label className="text-sm">Swipe Duration (s)</Label>
+                  <Input
+                    type="number"
+                    min="0.1"
+                    max="5"
+                    step="0.1"
+                    value={autoPlayConfig.swipeDuration}
+                    onChange={(e) =>
+                      setAutoPlayConfig((prev) => ({
+                        ...prev,
+                        swipeDuration: parseFloat(e.target.value) || 0.8,
                       }))
                     }
                     className="mt-1"
@@ -426,10 +489,10 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
           />
 
           {/* 设备预览 */}
-          <div className="relative">
+          <div className="relative" ref={previewCaptureRef}>
             <RecordingDevicePreview
               scale={0.5}
-              controlledPhoneState={recordingMode === "auto" ? controlledPhoneState : undefined}
+              autoCommand={recordingMode === "auto" ? autoCommand : undefined}
               disableInteractions={recordingMode === "auto"}
             />
           </div>

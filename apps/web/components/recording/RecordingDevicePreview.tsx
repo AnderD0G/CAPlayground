@@ -13,13 +13,13 @@ import Moveable from "react-moveable";
 
 interface RecordingDevicePreviewProps {
   scale: number;
-  controlledPhoneState?: "Locked" | "Unlock" | "Sleep";
+  autoCommand?: { id: number; type: "sleep" | "wake" | "swipe_unlock"; durationMs?: number };
   disableInteractions?: boolean;
 }
 
 export function RecordingDevicePreview({
   scale,
-  controlledPhoneState,
+  autoCommand,
   disableInteractions = false,
 }: RecordingDevicePreviewProps) {
   const stageRef = useRef<HTMLDivElement | null>(null);
@@ -99,7 +99,7 @@ export function RecordingDevicePreview({
         setPreviewLayers={setPreviewLayers}
         scale={fitScale * scale}
         stageStyle={{ background: "transparent" }}
-        controlledPhoneState={controlledPhoneState}
+        autoCommand={autoCommand}
         disableInteractions={disableInteractions}
       >
         <div
