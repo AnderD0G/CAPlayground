@@ -8,6 +8,7 @@ export interface RecorderOptions {
   canvas?: HTMLCanvasElement;
   targetElement?: HTMLElement;
   useDisplayMedia?: boolean;
+  preferredFormat?: "auto" | "mp4" | "webm";
   outputScale?: number;
   fps?: number;
   videoBitsPerSecond?: number;
@@ -22,6 +23,7 @@ export class VideoRecorder {
   private canvas?: HTMLCanvasElement;
   private targetElement?: HTMLElement;
   private useDisplayMedia: boolean;
+  private preferredFormat: "auto" | "mp4" | "webm";
   private outputScale: number;
   private captureCanvas: HTMLCanvasElement | null = null;
   private captureIntervalId: number | null = null;
@@ -41,6 +43,7 @@ export class VideoRecorder {
     this.canvas = options.canvas;
     this.targetElement = options.targetElement;
     this.useDisplayMedia = options.useDisplayMedia ?? false;
+    this.preferredFormat = options.preferredFormat ?? "auto";
     this.outputScale = options.outputScale ?? 1;
     this.fps = options.fps || 30;
     this.videoBitsPerSecond = options.videoBitsPerSecond || 5000000; // 5Mbps
@@ -329,26 +332,25 @@ export class VideoRecorder {
   }
 
   private getSupportedMimeType(): string | undefined {
-    const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
-    const isSafari = /Safari/i.test(ua) && !/Chrome|Chromium|Edg/i.test(ua);
+    const mp4Types = [
+      'video/mp4;codecs=h264,aac',
+      'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+      'video/mp4;codecs=avc1',
+      'video/mp4',
+    ];
+    const webmTypes = [
+      'video/webm;codecs=vp9,opus',
+      'video/webm;codecs=vp8,opus',
+      'video/webm;codecs=vp8',
+      'video/webm',
+    ];
 
-    const webmFirst = [
-      'video/webm;codecs=vp9,opus',
-      'video/webm;codecs=vp8,opus',
-      'video/webm',
-      'video/mp4;codecs=h264,aac',
-      'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
-      'video/mp4',
-    ];
-    const mp4First = [
-      'video/mp4;codecs=h264,aac',
-      'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
-      'video/mp4',
-      'video/webm;codecs=vp9,opus',
-      'video/webm;codecs=vp8,opus',
-      'video/webm',
-    ];
-    const types = isSafari ? mp4First : webmFirst;
+    const types =
+      this.preferredFormat === "mp4"
+        ? [...mp4Types, ...webmTypes]
+        : this.preferredFormat === "webm"
+          ? [...webmTypes, ...mp4Types]
+          : [...mp4Types, ...webmTypes];
 
     for (const type of types) {
       if (MediaRecorder.isTypeSupported(type)) {
@@ -361,6 +363,11 @@ export class VideoRecorder {
 
   getIsRecording(): boolean {
     return this.isRecording;
+  }
+
+  getOutputExtension(): "mp4" | "webm" {
+    const mime = this.mimeTypeUsed || "";
+    return mime.includes("mp4") ? "mp4" : "webm";
   }
 
   /**

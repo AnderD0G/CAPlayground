@@ -15,11 +15,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ArrowLeft, Upload, Play, Square } from "lucide-react";
 import { RecordingDevicePreview } from "./RecordingDevicePreview";
 import { VideoRecorder } from "@/lib/video-recorder";
+import { transcodeWebMToMp4 } from "@/lib/browser-transcoder";
 import { useToast } from "@/hooks/use-toast";
 
 interface RecordingContainerProps {
   onBackClick: () => void;
 }
+
 
 type BackgroundType = "checkerboard" | "color" | "image";
 type RecordingMode = "manual" | "auto";
@@ -52,6 +54,9 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
   const [recordingMode, setRecordingMode] = useState<RecordingMode>("manual");
   const [previewScale, setPreviewScale] = useState(1); // 默认 100% 保证 1:1 对应
   const [fps, setFps] = useState(60); // 提高默认帧率到 60
+  const [formatPreference, setFormatPreference] = useState<"auto" | "mp4" | "webm">("auto");
+  const [useBrowserMp4Transcode, setUseBrowserMp4Transcode] = useState(true);
+  const [isConvertingToMp4, setIsConvertingToMp4] = useState(false);
   const [resolutionMode, setResolutionMode] = useState<"preview-sync" | "preset">("preview-sync");
   const [resolutionPreset, setResolutionPreset] = useState<"1080x1920" | "1290x2796" | "1440x3120" | "2160x4680" | "custom">("1290x2796");
 
@@ -70,7 +75,7 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
   const [recordingProgress, setRecordingProgress] = useState(0);
   const [autoCommand, setAutoCommand] = useState<AutoCommand | undefined>(undefined);
   const [exportFilename, setExportFilename] = useState(
-    `recording-${new Date().getTime()}.webm`
+    `recording-${new Date().getTime()}.mp4`
   );
 
   const clearAutoSequence = () => {
@@ -163,13 +168,28 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
       const pixelCount = (previewCaptureRef.current?.getBoundingClientRect().width ?? 390) * 
                          (previewCaptureRef.current?.getBoundingClientRect().height ?? 844) * 
                          (outputScale * outputScale);
-      // 根据像素数、帧率计算合理的码率 (每像素每帧约 0.15 bits)
-      videoBitrate = Math.max(3000000, Math.round(pixelCount * fps * 0.15));
+
+      const recorderPreferredFormat =
+        useBrowserMp4Transcode && formatPreference === "mp4" ? "webm" : formatPreference;
+
+      const highLoadPreset = resolutionPreset === "2160x4680" || fps >= 120;
+      const baseBpp =
+        recorderPreferredFormat === "webm"
+          ? 0.07
+          : recorderPreferredFormat === "mp4"
+            ? 0.1
+            : 0.085;
+      const tunedBpp = highLoadPreset ? baseBpp * 0.8 : baseBpp;
+
+      // 限制码率上限，避免高分辨率+高帧率下编码器卡顿
+      const rawBitrate = Math.round(pixelCount * fps * tunedBpp);
+      videoBitrate = Math.max(4_000_000, Math.min(28_000_000, rawBitrate));
 
       recorderRef.current = new VideoRecorder({
         canvas: canvasRef.current ?? undefined,
         targetElement: previewCaptureRef.current,
         useDisplayMedia: true,
+        preferredFormat: recorderPreferredFormat,
         outputScale,
         fps,
         videoBitsPerSecond: videoBitrate,
@@ -260,12 +280,53 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
 
       setIsRecording(false);
 
+      const recordedExt = recorderRef.current.getOutputExtension();
+      const desiredExt = formatPreference === "auto" ? recordedExt : formatPreference;
+
+      let outputBlob = blob;
+      let outputExt: "webm" | "mp4" = recordedExt;
+
+      if (
+        desiredExt === "mp4" &&
+        recordedExt === "webm" &&
+        useBrowserMp4Transcode
+      ) {
+        setIsConvertingToMp4(true);
+        toast({
+          title: "Converting to MP4",
+          description: "Browser is converting WebM to MP4...",
+        });
+
+        try {
+          outputBlob = await transcodeWebMToMp4(blob);
+          outputExt = "mp4";
+        } catch (convertError) {
+          console.warn("MP4 conversion failed, fallback to WebM:", convertError);
+          outputBlob = blob;
+          outputExt = "webm";
+          toast({
+            title: "MP4 conversion failed",
+            description: "Exported as WebM instead. You can still upload after local conversion.",
+            variant: "destructive",
+          });
+        } finally {
+          setIsConvertingToMp4(false);
+        }
+      } else if (desiredExt === "mp4" && recordedExt === "webm") {
+        toast({
+          title: "Exported as WebM",
+          description: "MP4 codec not available in this browser for current settings.",
+        });
+      }
+
+      const normalizedFilename = exportFilename.replace(/\.(webm|mp4)$/i, "") + `.${outputExt}`;
+
       // 导出视频
-      await VideoRecorder.exportVideo(blob, exportFilename);
+      await VideoRecorder.exportVideo(outputBlob, normalizedFilename);
 
       toast({
         title: "Success",
-        description: `Video exported (${Math.round(blob.size / 1024)} KB) as ${exportFilename}`,
+        description: `Video exported (${Math.round(outputBlob.size / 1024)} KB) as ${normalizedFilename}`,
       });
     } catch (error) {
       console.error("Failed to stop recording:", error);
@@ -535,11 +596,35 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
           <div className="space-y-3">
             <h3 className="font-medium text-sm">Export</h3>
             <div>
+              <Label className="text-sm">Format</Label>
+              <Select value={formatPreference} onValueChange={(v) => setFormatPreference(v as "auto" | "mp4" | "webm") }>
+                <SelectTrigger className="w-full mt-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto">Auto (balanced)</SelectItem>
+                  <SelectItem value="mp4">MP4 (social upload)</SelectItem>
+                  <SelectItem value="webm">WebM (performance)</SelectItem>
+                </SelectContent>
+              </Select>
+
+              {formatPreference === "mp4" && (
+                <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={useBrowserMp4Transcode}
+                    onChange={(e) => setUseBrowserMp4Transcode(e.target.checked)}
+                  />
+                  Record as WebM then convert to MP4 in browser (smoother at high resolution)
+                </label>
+              )}
+            </div>
+            <div>
               <Label className="text-sm">Filename</Label>
               <Input
                 value={exportFilename}
                 onChange={(e) => setExportFilename(e.target.value)}
-                placeholder="recording.webm"
+                placeholder="recording.mp4"
                 className="mt-1 text-sm"
               />
             </div>
@@ -567,6 +652,11 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
           {recordingProgress > 0 && (
             <div className="text-xs text-muted-foreground text-center">
               Recording: {recordingProgress}%
+            </div>
+          )}
+          {isConvertingToMp4 && (
+            <div className="text-xs text-muted-foreground text-center animate-pulse">
+              Converting WebM to MP4...
             </div>
           )}
         </div>
