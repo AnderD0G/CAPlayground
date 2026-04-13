@@ -21,6 +21,9 @@ type Props = {
   showPreview: boolean;
   setPreviewLayers: (layers: AnyLayer[] | null) => void;
   scale: number;
+  stageStyle?: React.CSSProperties;
+  controlledPhoneState?: "Locked" | "Unlock" | "Sleep";
+  disableInteractions?: boolean;
 }
 
 export default function DevicePreview({
@@ -28,6 +31,9 @@ export default function DevicePreview({
   showPreview,
   setPreviewLayers,
   scale,
+  stageStyle,
+  controlledPhoneState,
+  disableInteractions = false,
 }: Props) {
   const { doc } = useEditor();
   const { play, pause } = useTimeline()
@@ -114,6 +120,12 @@ export default function DevicePreview({
       ]);
     }
   }, [showPreview]);
+
+  useEffect(() => {
+    if (!showPreview || !controlledPhoneState) return;
+    setDragOffset(0);
+    setPhoneState(controlledPhoneState);
+  }, [controlledPhoneState, showPreview]);
 
   const prevThemeRef = useRef(theme);
   useEffect(() => {
@@ -335,6 +347,7 @@ export default function DevicePreview({
   const dragStartElementRef = useRef<"home-bar" | "status-bar" | null>(null);
 
   const handleSideButtonClick = () => {
+    if (disableInteractions) return;
     if (phoneState === PHONE_STATES.SLEEP) {
       setPhoneState(PHONE_STATES.LOCKED);
       setDragOffset(0);
@@ -344,6 +357,7 @@ export default function DevicePreview({
   };
 
   const handleScreenClick = () => {
+    if (disableInteractions) return;
     if (!isAnimatingToSleep && !isAnimatingFromSleep && phoneState === PHONE_STATES.SLEEP) {
       setPhoneState(PHONE_STATES.LOCKED);
       setDragOffset(0);
@@ -351,6 +365,7 @@ export default function DevicePreview({
   };
 
   const onDragStart = (clientY: number, element: "home-bar" | "status-bar") => {
+    if (disableInteractions) return;
     if (phoneState === PHONE_STATES.LOCKED && element !== "home-bar") return;
     if (phoneState === PHONE_STATES.UNLOCK && element !== "status-bar") return;
 
@@ -488,7 +503,7 @@ export default function DevicePreview({
   return (
     <div
       className={'flex flex-col items-center justify-center w-full h-full select-none'}
-      style={{ background: 'radial-gradient(circle at top, #222 0%, #000 60%)' }}
+      style={{ background: 'radial-gradient(circle at top, #222 0%, #000 60%)', ...stageStyle }}
       onMouseMove={isDragging ? handleMouseMove : undefined}
       onMouseUp={isDragging ? handleMouseUp : undefined}
       onMouseLeave={isDragging ? handleMouseUp : undefined}
@@ -508,7 +523,7 @@ export default function DevicePreview({
         <button
           className="absolute -right-3.5 top-[90px] w-3 h-[60px] rounded-[3px] bg-[#555] border-none cursor-pointer active:translate-x-px"
           onClick={handleSideButtonClick}
-          disabled={isAnimatingDragCancel || isAnimatingDragComplete || isAnimatingToSleep || isAnimatingFromSleep}
+          disabled={disableInteractions || isAnimatingDragCancel || isAnimatingDragComplete || isAnimatingToSleep || isAnimatingFromSleep}
         />
         <div className="absolute w-max bottom-[101%] left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 text-xs">
           <div className="flex shrink-0 items-center gap-2 rounded-md bg-white/80 dark:bg-gray-900/70 border border-gray-200 dark:border-gray-700 px-2 py-1">
@@ -516,7 +531,7 @@ export default function DevicePreview({
             <Switch
               checked={clockDepthEffect}
               onCheckedChange={setClockDepthEffect}
-              disabled={isAnimatingDragCancel || isAnimatingDragComplete || isAnimatingToSleep || isAnimatingFromSleep}
+              disabled={disableInteractions || isAnimatingDragCancel || isAnimatingDragComplete || isAnimatingToSleep || isAnimatingFromSleep}
             />
           </div>
           {hasAppearanceSplit && (
@@ -526,7 +541,7 @@ export default function DevicePreview({
               <Switch
                 checked={theme === 'Dark'}
                 onCheckedChange={(checked) => setTheme(checked ? 'Dark' : 'Light')}
-                disabled={isAnimatingDragCancel || isAnimatingDragComplete || isAnimatingToSleep || isAnimatingFromSleep}
+                disabled={disableInteractions || isAnimatingDragCancel || isAnimatingDragComplete || isAnimatingToSleep || isAnimatingFromSleep}
               />
               <Moon className="h-3 w-3" />
               <Label>Dark</Label>

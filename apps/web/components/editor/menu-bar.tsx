@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
-import { ArrowLeft, Pencil, Trash2, Sun, Moon, Keyboard, PanelLeft, PanelRight, Settings as Gear, ArrowUpDown, Layers as LayersIcon, Check, X, MoreVertical, Eye, EyeOff, Undo2, Redo2 } from "lucide-react";
+import { ArrowLeft, Pencil, Trash2, Sun, Moon, Keyboard, PanelLeft, PanelRight, Settings as Gear, ArrowUpDown, Layers as LayersIcon, Check, X, MoreVertical, Eye, EyeOff, Undo2, Redo2, Video } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useEditor } from "./editor-context";
 import { useLocalStorage } from "@/hooks/use-local-storage";
@@ -173,6 +173,10 @@ export function MenuBar({ projectId, showLeft = true, showRight = true, toggleLe
               <DropdownMenuItem className="text-destructive cursor-pointer" onClick={() => setDeleteOpen(true)}>
                 <Trash2 className="h-4 w-4 mr-2" /> Delete
               </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem className="cursor-pointer" onClick={() => router.push(`/recording/${projectId}`)}>
+                  <Video className="h-4 w-4 mr-2" /> Record & Export
+                </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
