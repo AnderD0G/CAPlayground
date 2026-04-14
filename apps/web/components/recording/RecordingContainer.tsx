@@ -104,6 +104,23 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
   const [signatureColor, setSignatureColor] = useState("#000000");
   const [signatureOpacity, setSignatureOpacity] = useState(0.85);
 
+  // 图片签名
+  const [signatureMode, setSignatureMode] = useState<"text" | "image">("text"); // 签名模式：文字或图片
+  const [signatureImage, setSignatureImage] = useState<string | null>(null);
+  const [signatureImageWidth, setSignatureImageWidth] = useState(80); // 图片宽度像素
+  const [signatureImageOpacity, setSignatureImageOpacity] = useState(0.9);
+
+  const handleSignatureImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      setSignatureImage(event.target?.result as string);
+    };
+    reader.readAsDataURL(file);
+  };
+
   const clearAutoSequence = () => {
     for (const timeoutId of autoSequenceTimeoutsRef.current) {
       window.clearTimeout(timeoutId);
@@ -189,6 +206,37 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
       textShadow: "0 1px 8px rgba(0,0,0,0.3)",
       pointerEvents: "none",
       whiteSpace: "nowrap",
+    };
+  };
+
+  // 获取图片签名样式
+  const getSignatureImageStyle = (): React.CSSProperties => {
+    const safeAreaPercent = 4; // 4% 安全区距离
+    const availableHeight = 100 - safeAreaPercent * 2; // 92%
+    const availableWidth = 100 - safeAreaPercent * 2; // 92%
+    
+    // 垂直位置：根据 signatureVertical (0-100) 和 signaturePlacement
+    let topPercent: number;
+    if (signaturePlacement === "top") {
+      topPercent = safeAreaPercent + (signatureVertical / 100) * availableHeight;
+    } else {
+      topPercent = 100 - safeAreaPercent - ((100 - signatureVertical) / 100) * availableHeight;
+    }
+    
+    // 水平位置：根据 signatureHorizontal (0-100)
+    const leftPercent = safeAreaPercent + (signatureHorizontal / 100) * availableWidth;
+    
+    return {
+      position: "absolute",
+      left: `${leftPercent}%`,
+      top: `${topPercent}%`,
+      transform: "translate(-50%, -50%)",
+      width: `${signatureImageWidth}px`,
+      height: "auto",
+      opacity: signatureImageOpacity,
+      pointerEvents: "none",
+      objectFit: "contain",
+      filter: "drop-shadow(0 1px 8px rgba(0,0,0,0.3))",
     };
   };
   // 开始录制
@@ -542,111 +590,173 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
             
             {showSignature && (
               <div className="space-y-3">
-                <div>
-                  <Label className="text-xs">Text</Label>
-                  <Input
-                    value={signatureText}
-                    onChange={(e) => setSignatureText(e.target.value)}
-                    placeholder="Enter signature"
-                    className="mt-1 text-sm h-8"
-                  />
-                </div>
+                {/* 签名模式选择 */}
+                <Tabs value={signatureMode} onValueChange={(v: any) => setSignatureMode(v)}>
+                  <TabsList className="w-full h-8">
+                    <TabsTrigger value="text" className="text-xs flex-1">Text</TabsTrigger>
+                    <TabsTrigger value="image" className="text-xs flex-1">Image</TabsTrigger>
+                  </TabsList>
 
-                <div>
-                  <Label className="text-xs">Position</Label>
-                  <Select value={signaturePlacement} onValueChange={(v: any) => setSignaturePlacement(v)}>
-                    <SelectTrigger className="h-8 text-sm">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="top">Top</SelectItem>
-                      <SelectItem value="bottom">Bottom</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+                  {/* 文字签名 */}
+                  <TabsContent value="text" className="space-y-3 mt-2">
+                    <div>
+                      <Label className="text-xs">Text</Label>
+                      <Input
+                        value={signatureText}
+                        onChange={(e) => setSignatureText(e.target.value)}
+                        placeholder="Enter signature"
+                        className="mt-1 text-sm h-8"
+                      />
+                    </div>
 
-                <div>
-                  <Label className="text-xs">Vertical Distance ({signatureVertical}%)</Label>
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    value={signatureVertical}
-                    onChange={(e) => setSignatureVertical(parseInt(e.target.value))}
-                    className="w-full mt-1 h-2"
-                  />
-                </div>
+                    <div>
+                      <Label className="text-xs">Font Size ({signatureFontSize}px)</Label>
+                      <input
+                        type="range"
+                        min="8"
+                        max="36"
+                        step="1"
+                        value={signatureFontSize}
+                        onChange={(e) => setSignatureFontSize(parseInt(e.target.value))}
+                        className="w-full mt-1 h-2"
+                      />
+                    </div>
 
-                <div>
-                  <Label className="text-xs">Horizontal Position ({signatureHorizontal}%)</Label>
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    value={signatureHorizontal}
-                    onChange={(e) => setSignatureHorizontal(parseInt(e.target.value))}
-                    className="w-full mt-1 h-2"
-                  />
-                </div>
+                    <div>
+                      <Label className="text-xs">Font</Label>
+                      <Select value={signatureFont} onValueChange={setSignatureFont}>
+                        <SelectTrigger className="h-8 text-sm">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Arial">Arial</SelectItem>
+                          <SelectItem value="Georgia">Georgia</SelectItem>
+                          <SelectItem value="Times New Roman">Times New Roman</SelectItem>
+                          <SelectItem value="Courier New">Courier New</SelectItem>
+                          <SelectItem value="Verdana">Verdana</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
 
-                <div>
-                  <Label className="text-xs">Font Size ({signatureFontSize}px)</Label>
-                  <input
-                    type="range"
-                    min="8"
-                    max="36"
-                    step="1"
-                    value={signatureFontSize}
-                    onChange={(e) => setSignatureFontSize(parseInt(e.target.value))}
-                    className="w-full mt-1 h-2"
-                  />
-                </div>
+                    <div>
+                      <Label className="text-xs">Color</Label>
+                      <div className="flex gap-2 mt-1">
+                        <Input
+                          type="color"
+                          value={signatureColor}
+                          onChange={(e) => setSignatureColor(e.target.value)}
+                          className="h-8 w-16"
+                        />
+                        <Input
+                          type="text"
+                          value={signatureColor}
+                          onChange={(e) => setSignatureColor(e.target.value)}
+                          className="flex-1 text-xs h-8"
+                        />
+                      </div>
+                    </div>
 
-                <div>
-                  <Label className="text-xs">Font</Label>
-                  <Select value={signatureFont} onValueChange={setSignatureFont}>
-                    <SelectTrigger className="h-8 text-sm">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Arial">Arial</SelectItem>
-                      <SelectItem value="Georgia">Georgia</SelectItem>
-                      <SelectItem value="Times New Roman">Times New Roman</SelectItem>
-                      <SelectItem value="Courier New">Courier New</SelectItem>
-                      <SelectItem value="Verdana">Verdana</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+                    <div>
+                      <Label className="text-xs">Opacity ({Math.round(signatureOpacity * 100)}%)</Label>
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.05"
+                        value={signatureOpacity}
+                        onChange={(e) => setSignatureOpacity(parseFloat(e.target.value))}
+                        className="w-full mt-1 h-2"
+                      />
+                    </div>
+                  </TabsContent>
 
-                <div>
-                  <Label className="text-xs">Color</Label>
-                  <div className="flex gap-2 mt-1">
-                    <Input
-                      type="color"
-                      value={signatureColor}
-                      onChange={(e) => setSignatureColor(e.target.value)}
-                      className="h-8 w-16"
-                    />
-                    <Input
-                      type="text"
-                      value={signatureColor}
-                      onChange={(e) => setSignatureColor(e.target.value)}
-                      className="flex-1 text-xs h-8"
+                  {/* 图片签名 */}
+                  <TabsContent value="image" className="space-y-3 mt-2">
+                    <div>
+                      <Label className="text-xs">Upload Image</Label>
+                      <label className="flex items-center justify-center w-full px-3 py-2 border-2 border-dashed rounded-lg cursor-pointer hover:border-primary/50 transition-colors mt-1">
+                        <div className="flex items-center gap-2">
+                          <Upload className="h-4 w-4" />
+                          <span className="text-xs">Click to upload</span>
+                        </div>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleSignatureImageUpload}
+                          className="hidden"
+                        />
+                      </label>
+                      {signatureImage && (
+                        <div className="mt-2 text-xs text-muted-foreground">Image loaded ✓</div>
+                      )}
+                    </div>
+
+                    <div>
+                      <Label className="text-xs">Width ({signatureImageWidth}px)</Label>
+                      <input
+                        type="range"
+                        min="20"
+                        max="200"
+                        step="5"
+                        value={signatureImageWidth}
+                        onChange={(e) => setSignatureImageWidth(parseInt(e.target.value))}
+                        className="w-full mt-1 h-2"
+                      />
+                    </div>
+
+                    <div>
+                      <Label className="text-xs">Opacity ({Math.round(signatureImageOpacity * 100)}%)</Label>
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.05"
+                        value={signatureImageOpacity}
+                        onChange={(e) => setSignatureImageOpacity(parseFloat(e.target.value))}
+                        className="w-full mt-1 h-2"
+                      />
+                    </div>
+                  </TabsContent>
+                </Tabs>
+
+                {/* 公共位置控制 */}
+                <div className="border-t pt-3">
+                  <div>
+                    <Label className="text-xs">Position</Label>
+                    <Select value={signaturePlacement} onValueChange={(v: any) => setSignaturePlacement(v)}>
+                      <SelectTrigger className="h-8 text-sm mt-1">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="top">Top</SelectItem>
+                        <SelectItem value="bottom">Bottom</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="mt-3">
+                    <Label className="text-xs">Vertical Distance ({signatureVertical}%)</Label>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={signatureVertical}
+                      onChange={(e) => setSignatureVertical(parseInt(e.target.value))}
+                      className="w-full mt-1 h-2"
                     />
                   </div>
-                </div>
 
-                <div>
-                  <Label className="text-xs">Opacity ({Math.round(signatureOpacity * 100)}%)</Label>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.05"
-                    value={signatureOpacity}
-                    onChange={(e) => setSignatureOpacity(parseFloat(e.target.value))}
-                    className="w-full mt-1 h-2"
-                  />
+                  <div className="mt-3">
+                    <Label className="text-xs">Horizontal Position ({signatureHorizontal}%)</Label>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={signatureHorizontal}
+                      onChange={(e) => setSignatureHorizontal(parseInt(e.target.value))}
+                      className="w-full mt-1 h-2"
+                    />
+                  </div>
                 </div>
               </div>
             )}
@@ -1003,16 +1113,25 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
             />
 
             {/* 签名层 */}
-            {showSignature && signatureText.trim() && (
+            {showSignature && (
               <div 
                 className="absolute inset-0 pointer-events-none z-20 rounded-2xl overflow-hidden"
                 style={{
                   padding: "4%"
                 }}
               >
-                <div style={getSignatureStyle()}>
-                  {signatureText}
-                </div>
+                {signatureMode === "text" && signatureText.trim() && (
+                  <div style={getSignatureStyle()}>
+                    {signatureText}
+                  </div>
+                )}
+                {signatureMode === "image" && signatureImage && (
+                  <img 
+                    src={signatureImage}
+                    alt="Signature"
+                    style={getSignatureImageStyle() as any}
+                  />
+                )}
               </div>
             )}
           </div>
