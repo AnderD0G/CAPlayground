@@ -52,6 +52,9 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
   const [backgroundType, setBackgroundType] = useState<BackgroundType>("checkerboard");
   const [backgroundColor, setBackgroundColor] = useState("#f3f4f6");
   const [backgroundImage, setBackgroundImage] = useState<string | null>(null);
+  const [backgroundBlur, setBackgroundBlur] = useState(0);
+  const [backgroundOverlayColor, setBackgroundOverlayColor] = useState("#000000");
+  const [backgroundOverlayOpacity, setBackgroundOverlayOpacity] = useState(0);
 
   // 录制模式
   const [recordingMode, setRecordingMode] = useState<RecordingMode>("manual");
@@ -160,22 +163,37 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
 
   // 获取背景样式
   const getBackgroundStyle = (): React.CSSProperties => {
+    const blurStyle: React.CSSProperties =
+      backgroundBlur > 0
+        ? {
+            filter: `blur(${backgroundBlur}px)`,
+            transform: "scale(1.04)",
+          }
+        : {};
+
     if (backgroundType === "checkerboard") {
       return {
         background:
           "repeating-conic-gradient(#f8fafc 0% 25%, #e5e7eb 0% 50%) 50% center / 20px 20px",
+        ...blurStyle,
       };
     } else if (backgroundType === "color") {
-      return { background: backgroundColor };
+      return { background: backgroundColor, ...blurStyle };
     } else if (backgroundType === "image" && backgroundImage) {
       return {
         backgroundImage: `url(${backgroundImage})`,
         backgroundSize: "cover",
         backgroundPosition: "center",
+        ...blurStyle,
       };
     }
-    return {};
+    return blurStyle;
   };
+
+  const getBackgroundOverlayStyle = (): React.CSSProperties => ({
+    backgroundColor: backgroundOverlayColor,
+    opacity: backgroundOverlayOpacity,
+  });
   // 获取签名样式
   const getSignatureStyle = (): React.CSSProperties => {
     const safeAreaPercent = 4; // 4% 安全区距离
@@ -576,6 +594,52 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
                 )}
               </div>
             )}
+
+            <div>
+              <Label className="text-xs">Background Blur ({backgroundBlur}px)</Label>
+              <Input
+                type="range"
+                min="0"
+                max="40"
+                step="1"
+                value={backgroundBlur}
+                onChange={(e) => setBackgroundBlur(parseInt(e.target.value) || 0)}
+                className="mt-1"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-xs">Background Mask</Label>
+              <div className="flex gap-2">
+                <Input
+                  type="color"
+                  value={backgroundOverlayColor}
+                  onChange={(e) => setBackgroundOverlayColor(e.target.value)}
+                  className="h-10 w-20"
+                />
+                <Input
+                  type="text"
+                  value={backgroundOverlayColor}
+                  onChange={(e) => setBackgroundOverlayColor(e.target.value)}
+                  placeholder="#000000"
+                  className="flex-1 text-sm"
+                />
+              </div>
+              <div>
+                <Label className="text-xs">
+                  Mask Opacity ({Math.round(backgroundOverlayOpacity * 100)}%)
+                </Label>
+                <Input
+                  type="range"
+                  min="0"
+                  max="0.8"
+                  step="0.01"
+                  value={backgroundOverlayOpacity}
+                  onChange={(e) => setBackgroundOverlayOpacity(parseFloat(e.target.value) || 0)}
+                  className="mt-1"
+                />
+              </div>
+            </div>
           </div>
 
           {/* 签名配置 */}
@@ -1071,11 +1135,18 @@ export function RecordingContainer({ onBackClick }: RecordingContainerProps) {
       </div>
 
       {/* 右侧预览区 */}
-      <div className="flex-1 flex items-center justify-center overflow-hidden" ref={containerRef}>
+      <div className="flex-1 relative flex items-center justify-center overflow-hidden" ref={containerRef}>
         <div
-          className="w-full h-full flex items-center justify-center"
+          className="absolute -inset-8"
           style={getBackgroundStyle()}
-        >
+        />
+        {backgroundOverlayOpacity > 0 && (
+          <div
+            className="absolute inset-0"
+            style={getBackgroundOverlayStyle()}
+          />
+        )}
+        <div className="relative z-10 w-full h-full flex items-center justify-center">
           {/* 隐藏的Canvas用于录制 */}
           <canvas
             ref={canvasRef}
