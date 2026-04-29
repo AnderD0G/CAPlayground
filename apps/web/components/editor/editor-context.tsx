@@ -57,6 +57,7 @@ export type EditorContextValue = {
   addImageLayerFromFile: (file: File) => Promise<void>;
   addImageLayerFromBlob: (blob: Blob, filename?: string) => Promise<void>;
   replaceImageForLayer: (layerId: string, file: File) => Promise<void>;
+  replaceImageForLayerInView: (view: CAView, layerId: string, file: File) => Promise<void>;
   addEmitterCellImage: (layerId: string, file: File) => Promise<void>;
   replaceEmitterCellImage: (layerId: string, cellIndex: number, file: File) => Promise<void>;
   addShapeLayer: (shape?: ShapeLayer["shape"]) => void;
@@ -710,15 +711,14 @@ export function EditorProvider({
     });
   }, [addBase, doc]);
 
-  const replaceImageForLayer = useCallback(async (layerId: string, file: File) => {
+  const replaceImageForLayerInView = useCallback(async (view: CAView, layerId: string, file: File) => {
     if (/image\/gif/i.test(file.type || '') || /\.gif$/i.test(file.name || '')) {
       throw new Error('Cannot replace image with a GIF. Please use Video Layer to import GIFs.');
     }
-    // Eagerly write asset to storage
     const { file: fileToUpload, filename } = await convertSvgToPngIfNeeded(file);
     const safe = sanitizeFilename(filename) || `image-${Date.now()}.png`;
     try {
-      const caFolder = (currentKey === 'floating') ? 'Floating.ca' : (currentKey === 'wallpaper') ? 'Wallpaper.ca' : 'Background.ca';
+      const caFolder = view === 'floating' ? 'Floating.ca' : view === 'wallpaper' ? 'Wallpaper.ca' : 'Background.ca';
       const projName = doc?.meta.name || initialMeta.name;
       const folder = `${projName}.ca`;
       await putBlobFile(projectId, `${folder}/${caFolder}/assets/${safe}`, fileToUpload);
@@ -728,7 +728,7 @@ export function EditorProvider({
     setDoc((prev) => {
       if (!prev) return prev;
       pushHistory(prev);
-      const key = prev.activeCA;
+      const key = view;
       const cur = prev.docs[key];
       const updateRec = (layers: AnyLayer[]): AnyLayer[] =>
         layers.map((l) => {
@@ -743,7 +743,11 @@ export function EditorProvider({
       const next = { ...cur, layers: updateRec(cur.layers) };
       return { ...prev, docs: { ...prev.docs, [key]: next } } as ProjectDocument;
     });
-  }, [doc]);
+  }, [doc, initialMeta.name, projectId, pushHistory]);
+
+  const replaceImageForLayer = useCallback(async (layerId: string, file: File) => {
+    await replaceImageForLayerInView(currentKey, layerId, file);
+  }, [currentKey, replaceImageForLayerInView]);
 
   const addEmitterCellImage = useCallback(async (layerId: string, file: File) => {
     if (/image\/gif/i.test(file.type || '') || /\.gif$/i.test(file.name || '')) {
@@ -1763,6 +1767,7 @@ export function EditorProvider({
     addImageLayerFromFile,
     addImageLayerFromBlob,
     replaceImageForLayer,
+    replaceImageForLayerInView,
     replaceEmitterCellImage,
     addEmitterCellImage,
     removeEmitterCell,
@@ -1806,6 +1811,7 @@ export function EditorProvider({
     addImageLayerFromFile,
     addImageLayerFromBlob,
     replaceImageForLayer,
+    replaceImageForLayerInView,
     addEmitterCellImage,
     removeEmitterCell,
     addShapeLayer,
